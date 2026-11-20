@@ -1,0 +1,14 @@
+# бэкапы и мусор
+*.bak
+*.bak-*
+*.back
+*.orig
+*.log
+.DS_Store
+Thumbs.db
+
+# состояние приложений
+**/.cache/
+**/Logs/
+__pycache__/
+*.pyc

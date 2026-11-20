@@ -1,0 +1,3 @@
+#!/bin/sh
+# Chromium с принудительным JetBrainsMono Nerd Font на всех страницах
+exec /usr/bin/chromium --load-extension="$HOME/.local/share/chromium-font-force" "$@"

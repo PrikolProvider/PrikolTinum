@@ -1,0 +1,25 @@
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/master/doc/json_schema.json",
+    "logo": null,
+    "display": {
+        "key": { "type": "none", "width": 0 },
+        "separator": "",
+        "percent": { "type": ["num"] }
+    },
+    "modules": [
+        "title",
+        "os",
+        "kernel",
+        "wm",
+        "shell",
+        "terminal",
+        "uptime",
+        "packages",
+        "cpu",
+        "gpu",
+        "memory",
+        { "type": "disk", "folders": "/" },
+        "battery",
+        { "type": "localip", "showIpv6": false }
+    ]
+}

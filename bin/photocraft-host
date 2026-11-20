@@ -1,0 +1,29 @@
+#!/bin/sh
+# Run PhotoCraft outside the Flatpak sandbox.
+#
+# The Flatpak build saves through xdg-desktop-portal, which returns a
+# document-portal path.  PhotoCraft writes its temporary file next to that
+# path and adds the export extension, but the portal document keeps the name
+# chosen in the save dialog.  When the dialog name has no extension the
+# rename never reaches the real file and the export is left behind as a
+# hidden ".xdp-*.pcsave.tmp-*" file.
+#
+# Running the same installed binary directly gives PhotoCraft real file
+# paths, so exports work (and you can keep typing names without ".png").
+# Settings, data and cache stay in the Flatpak app's directories, and the
+# binary always comes from the currently installed Flatpak version.
+
+set -eu
+
+APP_BIN="${HOME}/.local/share/flatpak/app/ai.storyteller.photocraft/current/active/files/bin/photocraft"
+
+if [ ! -x "$APP_BIN" ]; then
+    exec flatpak run --branch=stable --arch=x86_64 --command=photocraft ai.storyteller.photocraft "$@"
+fi
+
+export XDG_CONFIG_HOME="${HOME}/.var/app/ai.storyteller.photocraft/config"
+export XDG_DATA_HOME="${HOME}/.var/app/ai.storyteller.photocraft/data"
+export XDG_CACHE_HOME="${HOME}/.var/app/ai.storyteller.photocraft/cache"
+unset FLATPAK_ID FLATPAK_ARCH FLATPAK_BRANCH FLATPAK_REF 2>/dev/null || true
+
+exec "$APP_BIN" "$@"

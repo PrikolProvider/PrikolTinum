@@ -1,0 +1,5 @@
+[user]
+	name = PrikolProvider
+	email = PrikolProvider@users.noreply.github.com
+[init]
+	defaultBranch = main

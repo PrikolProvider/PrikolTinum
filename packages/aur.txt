@@ -1,0 +1,16 @@
+ai.storyteller.artcraft-launcher
+ai.storyteller.effectcraft
+ai.storyteller.filmcraft
+caelestia-cli
+caelestia-shell
+crudini
+happ-desktop-bin
+libcava
+pyprland
+python-iniparse
+python-materialyoucolor
+qt6-m3shapes-git
+soundcloud-bin
+tg-ws-proxy-bin
+ttf-rubik-vf
+zoom

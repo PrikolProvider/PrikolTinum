@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""
+ffcard — мини-карточка системной информации для fastfetch.
+
+Данные берёт из `fastfetch --json` (конфиг data.jsonc), а рисует карточку
+с ровной рамкой, потому что сам fastfetch не умеет выравнивать правый край
+при значениях разной длины.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+DATA_CONFIG = os.path.expanduser("~/.config/fastfetch/data.jsonc")
+USE_COLOR = "NO_COLOR" not in os.environ and os.environ.get("FFCARD_COLOR") != "0"
+
+# ANSI (базовые цвета терминала -> автоматически следуют палитре kitty/noctalia)
+RESET = "\033[0m"
+DIM = "\033[90m"
+USER_C = "\033[34m"
+HOST_C = "\033[36m"
+BAR_ON = "\033[35m"
+BAR_OFF = "\033[90m"
+VAL_C = "\033[39m"
+
+if not USE_COLOR:
+    for name in ("RESET", "DIM", "USER_C", "HOST_C", "BAR_ON", "BAR_OFF", "VAL_C"):
+        globals()[name] = ""
+
+
+def run_fastfetch():
+    proc = subprocess.run(
+        ["fastfetch", "--json", "-c", DATA_CONFIG],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return {}
+    return {m["type"].lower(): m.get("result") for m in json.loads(proc.stdout)}
+
+
+def human_size(num_bytes):
+    if num_bytes is None:
+        return "?"
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    value = float(num_bytes)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit in ("B", "KiB"):
+                return f"{value:.0f} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TiB"
+
+
+def human_uptime(ms):
+    if ms is None:
+        return "?"
+    seconds = int(ms // 1000)
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def bar(ratio, width=10):
+    ratio = max(0.0, min(1.0, ratio))
+    filled = round(ratio * width)
+    return f"{BAR_ON}{'█' * filled}{BAR_OFF}{'░' * (width - filled)}{VAL_C}"
+
+
+def shorten_cpu(name):
+    m = re.search(r"\b(i[3579]-\d{4,5}\w*)\b", name)
+    if m:
+        return m.group(1)
+    return re.sub(r"\s*\((R|TM)\)\s*", " ", name).replace("  ", " ").strip()
+
+
+def terminal_name(fallback):
+    env = os.environ
+    if env.get("KITTY_WINDOW_ID") or "kitty" in env.get("TERM", ""):
+        return "kitty"
+    return env.get("TERM_PROGRAM") or fallback
+
+
+def build_rows(data):
+    rows = []
+
+    os_info = data.get("os") or {}
+    os_name = " ".join(
+        p for p in (os_info.get("prettyName") or os_info.get("name"), os_info.get("version")) if p
+    )
+    if os_name:
+        rows.append(("os", os_name))
+
+    kernel = data.get("kernel") or {}
+    if kernel.get("release"):
+        rows.append(("kernel", kernel["release"]))
+
+    wm = data.get("wm") or {}
+    wm_name = " ".join(p for p in (wm.get("prettyName"), wm.get("version")) if p)
+    if wm_name:
+        rows.append(("wm", wm_name))
+
+    title = data.get("title") or {}
+    shell = os.path.basename(title.get("userShell", "")) or (data.get("shell") or {}).get("prettyName")
+    if shell:
+        rows.append(("shell", shell))
+
+    term = terminal_name((data.get("terminal") or {}).get("prettyName"))
+    if term:
+        rows.append(("term", term))
+
+    if data.get("uptime"):
+        rows.append(("uptime", human_uptime(data["uptime"].get("uptime"))))
+
+    pkgs = data.get("packages") or {}
+    if pkgs.get("all"):
+        label = f"{pkgs['all']}"
+        if pkgs.get("pacman"):
+            label += " (pacman)"
+        rows.append(("pkgs", label))
+
+    cpu = data.get("cpu") or {}
+    if cpu.get("cpu"):
+        name = shorten_cpu(cpu["cpu"])
+        cores = cpu.get("cores") or {}
+        physical = cores.get("physical")
+        logical = cores.get("logical")
+        freq = (cpu.get("frequency") or {}).get("max")
+        extra = []
+        if physical and logical:
+            extra.append(f"{physical}c/{logical}t")
+        elif logical:
+            extra.append(f"{logical} threads")
+        if freq:
+            extra.append(f"{freq / 1000:.2f} GHz")
+        rows.append(("cpu", f"{name} · {', '.join(extra)}" if extra else name))
+
+    gpus = data.get("gpu") or []
+    if gpus:
+        g = gpus[0]
+        gpu = " ".join(p for p in (g.get("vendor"), g.get("name")) if p)
+        if (g.get("type") or "").lower() == "integrated":
+            gpu += " · integrated"
+        rows.append(("gpu", gpu))
+
+    mem = data.get("memory") or {}
+    if mem.get("total"):
+        used, total = mem.get("used") or 0, mem["total"]
+        rows.append(
+            (
+                "ram",
+                f"{bar(used / total)}  {human_size(used)} / {human_size(total)}",
+            )
+        )
+
+    disks = data.get("disk") or []
+    root = next((d for d in disks if d.get("mountpoint") == "/"), disks[0] if disks else None)
+    if root:
+        total = (root.get("bytes") or {}).get("total") or 0
+        free = (root.get("bytes") or {}).get("free") or 0
+        used = total - free
+        rows.append(
+            (
+                "disk",
+                f"{bar(used / total if total else 0)}  {human_size(used)} / {human_size(total)}",
+            )
+        )
+
+    batteries = data.get("battery") or []
+    if batteries:
+        b = batteries[0]
+        cap = b.get("capacity") or 0
+        status = (b.get("status") or ["Unknown"])[0]
+        short = {
+            "AC Connected": "AC",
+            "Charging": "charging",
+            "Discharging": "on battery",
+            "Full": "full",
+        }.get(status, status)
+        rows.append(("bat", f"{bar(cap / 100)}  {cap:.0f}% · {short}"))
+
+    ips = data.get("localip") or []
+    if ips:
+        ip = next((i for i in ips if i.get("defaultRoute", {}).get("ipv4")), ips[0])
+        addr = (ip.get("ipv4") or "").split("/")[0]
+        if addr:
+            rows.append(("ip", f"{addr} ({ip.get('name', '?')})"))
+
+    return rows, title
+
+
+def strip_ansi(text):
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
+
+def fit(text, width):
+    """Обрезает строку до width видимых символов, сохраняя ANSI-коды."""
+    if len(strip_ansi(text)) <= width:
+        return text
+    out, visible = [], 0
+    for part in re.split(r"(\x1b\[[0-9;]*[A-Za-z])", text):
+        if part.startswith("\x1b"):
+            out.append(part)
+            continue
+        for ch in part:
+            if visible >= width - 1:
+                out.append("…")
+                return "".join(out) + RESET
+            out.append(ch)
+            visible += 1
+    return "".join(out)
+
+
+def main():
+    data = run_fastfetch()
+    rows, title = build_rows(data)
+
+    user = title.get("userName") or os.environ.get("USER") or "user"
+    host = title.get("hostName") or "host"
+
+    try:
+        term_width = int(os.environ.get("COLUMNS") or 0)
+    except ValueError:
+        term_width = 0
+    if not term_width:
+        term_width = os.get_terminal_size().columns if sys.stdout.isatty() else 80
+    # рамка + внутренние отступы
+    max_inner = max(24, min(term_width - 4, 76))
+
+    key_width = max((len(k) for k, _ in rows), default=0)
+    value_gap = 2
+    pad = 2
+
+    header_plain = f"{user}@{host}"
+    plain_rows = [(k, strip_ansi(v)) for k, v in rows]
+    content_width = max(
+        [len(header_plain)] + [key_width + value_gap + len(v) for _, v in plain_rows]
+    )
+    inner = min(content_width + pad * 2, max_inner)
+    value_width = max(8, inner - pad * 2 - key_width - value_gap)
+
+    top = "╭" + "─" * inner + "╮"
+    mid = "├" + "─" * inner + "┤"
+    bottom = "╰" + "─" * inner + "╯"
+
+    lines = []
+    lines.append(f"{DIM}{top}{RESET}")
+    header = f"{USER_C}{user}{DIM}@{RESET}{HOST_C}{host}{RESET}"
+    header_pad = inner - pad * 2 - len(header_plain)
+    lines.append(f"{DIM}│{RESET}{' ' * pad}{header}{' ' * header_pad}{' ' * pad}{DIM}│{RESET}")
+    lines.append(f"{DIM}{mid}{RESET}")
+    for key, value in rows:
+        value = fit(value, value_width)
+        visible = len(strip_ansi(value))
+        fill = " " * max(0, inner - pad * 2 - key_width - value_gap - visible)
+        lines.append(
+            f"{DIM}│{RESET}{' ' * pad}{DIM}{key.ljust(key_width)}{RESET}"
+            f"{' ' * value_gap}{VAL_C}{value}{RESET}{fill}{' ' * pad}{DIM}│{RESET}"
+        )
+    lines.append(f"{DIM}{bottom}{RESET}")
+
+    print("\n".join(lines))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.TimeoutExpired:
+        print("ошибка: fastfetch не ответил вовремя", file=sys.stderr)
+        sys.exit(1)

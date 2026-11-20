@@ -1,0 +1,7 @@
+ai.storyteller.artcraft-launcher
+ai.storyteller.craft-anything
+ai.storyteller.photocraft
+ai.storyteller.soundcraft
+ai.storyteller.wordcraft
+com.obsproject.Studio
+org.vinegarhq.Sober
